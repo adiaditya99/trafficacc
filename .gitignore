@@ -23,5 +23,5 @@ users.json
 ~$*
 
 # Large datasets and models
-*.csv
-model/*.pkl
+# *.csv
+# model/*.pkl
