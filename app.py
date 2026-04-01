@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask_sqlalchemy import SQLAlchemy
 import joblib
 import pandas as pd
 import os
@@ -11,26 +12,34 @@ app.secret_key = 'trafficai_secret_2026'
 MODEL_PATH    = 'model/model.pkl'
 FEATURES_PATH = 'model/features.pkl'
 ENCODERS_PATH = 'model/encoders.pkl'
-USERS_FILE    = 'users.json'
 
 # ─────────────────────────────────────────────────────────────
-# User storage helpers (JSON file)
+# Configure Database (PostgreSQL for Render / SQLite fallback)
 # ─────────────────────────────────────────────────────────────
-def load_users():
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, 'r') as f:
-            return json.load(f)
-    # Default built-in accounts
-    return {'admin': {'password': 'admin123', 'fullname': 'Administrator'},
-            'user':  {'password': 'user123',  'fullname': 'Demo User'}}
+database_url = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
 
-def save_users(users):
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Initialise file on first run
-if not os.path.exists(USERS_FILE):
-    save_users(load_users())
+db = SQLAlchemy(app)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(120), nullable=False)
+    fullname = db.Column(db.String(120), nullable=False)
+
+with app.app_context():
+    db.create_all()
+    # Create default accounts if empty
+    if not User.query.first():
+        admin = User(username='admin', password='admin123', fullname='Administrator')
+        demo = User(username='user', password='user123', fullname='Demo User')
+        db.session.add(admin)
+        db.session.add(demo)
+        db.session.commit()
 
 # ─────────────────────────────────────────────────────────────
 # Severity map
@@ -91,11 +100,12 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
-        users    = load_users()
 
-        if username in users and users[username]['password'] == password:
-            session['username'] = username
-            session['fullname'] = users[username].get('fullname', username)
+        user = User.query.filter_by(username=username, password=password).first()
+
+        if user:
+            session['username'] = user.username
+            session['fullname'] = user.fullname
             return redirect(url_for('home'))
         else:
             error = 'Invalid username or password. Please try again.'
@@ -116,8 +126,6 @@ def register():
         password         = request.form.get('password', '').strip()
         confirm_password = request.form.get('confirm_password', '').strip()
 
-        users = load_users()
-
         # Validation
         if not fullname or not username or not password:
             error = 'All fields are required.'
@@ -129,13 +137,16 @@ def register():
             error = 'Password must be at least 6 characters.'
         elif password != confirm_password:
             error = 'Passwords do not match.'
-        elif username in users:
-            error = f'Username "{username}" is already taken. Please choose another.'
         else:
-            # Register the user
-            users[username] = {'password': password, 'fullname': fullname}
-            save_users(users)
-            success = f'Account created successfully! Welcome, {fullname}. You can now sign in.'
+            existing_user = User.query.filter_by(username=username).first()
+            if existing_user:
+                error = f'Username "{username}" is already taken. Please choose another.'
+            else:
+                # Register the user
+                new_user = User(username=username, password=password, fullname=fullname)
+                db.session.add(new_user)
+                db.session.commit()
+                success = f'Account created successfully! Welcome, {fullname}. You can now sign in.'
 
     return render_template('register.html', error=error, success=success)
 
