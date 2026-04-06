@@ -94,6 +94,196 @@
 
     <!-- Custom JS -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    
+    <!-- Global AI Chatbot Widget -->
+    <style>
+        #safety-ai-container {
+            position: fixed;
+            bottom: 25px;
+            right: 25px;
+            z-index: 9999;
+            font-family: 'Inter', sans-serif;
+        }
+        #safety-ai-fab {
+            width: 65px;
+            height: 65px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            font-size: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.5);
+            transition: transform 0.3s ease;
+        }
+        #safety-ai-fab:hover { transform: scale(1.08); }
+        #safety-ai-window {
+            display: none;
+            width: 340px;
+            height: 450px;
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            border-radius: 18px;
+            position: absolute;
+            bottom: 85px;
+            right: 0;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.7);
+            backdrop-filter: blur(15px);
+        }
+        .dark-mode #safety-ai-window {
+            background: rgba(30,30,40, 0.95);
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        #safety-ai-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 14px 18px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #safety-ai-close { cursor: pointer; font-size: 1.2rem; }
+        #safety-ai-body {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            font-size: 0.95rem;
+        }
+        .safety-msg-bubble {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .safety-msg-ai {
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--text-main);
+            border-bottom-left-radius: 4px;
+            align-self: flex-start;
+        }
+        .dark-mode .safety-msg-ai { background: rgba(255,255,255,0.08); }
+        .safety-msg-user {
+            background: var(--primary-color);
+            color: white;
+            border-bottom-right-radius: 4px;
+            align-self: flex-end;
+        }
+        #safety-ai-input-wrapper {
+            display: flex;
+            padding: 12px;
+            background: rgba(0,0,0,0.02);
+            border-top: 1px solid rgba(0,0,0,0.08);
+        }
+        .dark-mode #safety-ai-input-wrapper { background: transparent; border-top: 1px solid rgba(255,255,255,0.1); }
+        #safety-ai-input-box {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 25px;
+            border: 1px solid rgba(0,0,0,0.1);
+            background: var(--glass-bg);
+            color: var(--text-main);
+            outline: none;
+            font-size: 0.95rem;
+        }
+        .dark-mode #safety-ai-input-box { border-color: rgba(255,255,255,0.2); }
+        #safety-ai-send {
+            background: none;
+            border: none;
+            color: var(--primary-color);
+            margin-left: 10px;
+            cursor: pointer;
+            font-size: 1.4rem;
+        }
+        #safety-ai-typing { font-style: italic; color: var(--text-muted); font-size: 0.85rem; display: none; margin-left:15px; margin-bottom: 8px; }
+    </style>
+
+    <div id="safety-ai-container">
+        <div id="safety-ai-window">
+            <div id="safety-ai-header">
+                <div>🤖 Safety Assistant</div>
+                <div id="safety-ai-close">✖</div>
+            </div>
+            <div id="safety-ai-body">
+                <div class="safety-msg-bubble safety-msg-ai">Hi! I'm your AI Safety Assistant. How can I help you drive securely today?</div>
+            </div>
+            <div id="safety-ai-typing">Assistant is typing...</div>
+            <div id="safety-ai-input-wrapper">
+                <input type="text" id="safety-ai-input-box" placeholder="Ask a traffic question..." onkeypress="if(event.key==='Enter') sendSafetyMsg()">
+                <button id="safety-ai-send" onclick="sendSafetyMsg()">➤</button>
+            </div>
+        </div>
+        <div id="safety-ai-fab" title="Chat with AI Assistant">💬</div>
+    </div>
+
+    <script>
+        const sAiFab = document.getElementById('safety-ai-fab');
+        const sAiWindow = document.getElementById('safety-ai-window');
+        const sAiClose = document.getElementById('safety-ai-close');
+        const sAiBody = document.getElementById('safety-ai-body');
+        const sAiInput = document.getElementById('safety-ai-input-box');
+        const sAiTyping = document.getElementById('safety-ai-typing');
+        
+        let sAiMemory = [];
+
+        sAiFab.addEventListener('click', () => {
+            sAiWindow.style.display = sAiWindow.style.display === 'flex' ? 'none' : 'flex';
+        });
+
+        sAiClose.addEventListener('click', () => {
+            sAiWindow.style.display = 'none';
+        });
+
+        function addSafetyMsg(sender, text) {
+            const div = document.createElement('div');
+            div.className = sender === 'user' ? 'safety-msg-bubble safety-msg-user' : 'safety-msg-bubble safety-msg-ai';
+            div.textContent = text;
+            sAiBody.appendChild(div);
+            sAiBody.scrollTop = sAiBody.scrollHeight;
+        }
+
+        async function sendSafetyMsg() {
+            const text = sAiInput.value.trim();
+            if(!text) return;
+            
+            addSafetyMsg('user', text);
+            sAiInput.value = '';
+            sAiTyping.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text, history: sAiMemory })
+                });
+                
+                const data = await response.json();
+                sAiTyping.style.display = 'none';
+                
+                if(data.reply) {
+                    addSafetyMsg('ai', data.reply);
+                    sAiMemory.push({role: 'user', content: text});
+                    sAiMemory.push({role: 'assistant', content: data.reply});
+                    if(sAiMemory.length > 8) sAiMemory = sAiMemory.slice(-8);
+                } else {
+                    addSafetyMsg('ai', data.error || 'Connection error.');
+                }
+            } catch (err) {
+                sAiTyping.style.display = 'none';
+                addSafetyMsg('ai', 'Oops, network error! Try again.');
+                console.error(err);
+            }
+        }
+    </script>
+
     {% block scripts %}{% endblock %}
 </body>
 </html>

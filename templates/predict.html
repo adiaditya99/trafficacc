@@ -29,8 +29,11 @@
                 <!-- Vehicle Speed -->
                 <div class="input-group">
                     <label for="vehicle_speed">Vehicle Speed (mph)</label>
-                    <input type="number" step="0.1" id="vehicle_speed" name="Vehicle_Speed"
-                           min="0" max="250" placeholder="e.g. 65" class="glass-input" required>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="number" step="0.1" id="vehicle_speed" name="Vehicle_Speed"
+                               min="0" max="250" placeholder="e.g. 65" class="glass-input" style="flex: 1;" required>
+                        <button type="button" id="btn-speedometer" class="btn btn-secondary" style="white-space: nowrap; padding: 0.5rem 1rem; width:110px;" title="Track speed via device GPS">⏱️ Live</button>
+                    </div>
                 </div>
 
                 <!-- Speed Limit (Hidden, Automatically Synced) -->
@@ -169,6 +172,39 @@
 
 {% block scripts %}
 <script>
+let audioCtx;
+let alarmPlaying = false;
+let alarmInterval = null;
+
+function playAlarm() {
+    if (alarmPlaying) return;
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    
+    alarmInterval = setInterval(() => {
+        if (!alarmPlaying) return;
+        let osc = audioCtx.createOscillator();
+        let g = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime); 
+        osc.frequency.setValueAtTime(1200, audioCtx.currentTime + 0.2); 
+        g.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        osc.connect(g);
+        g.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.4);
+    }, 500);
+
+    alarmPlaying = true;
+}
+
+function stopAlarm() {
+    alarmPlaying = false;
+    if (alarmInterval) clearInterval(alarmInterval);
+    alarmInterval = null;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     
     let hospMapInstance = null;
@@ -256,19 +292,14 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Set Road Type
             const address = lData.address || {};
-            let detectedRoad = "Rural Roads";
+            let detectedRoad = "Rural";
             const roadStr = (address.road || "").toLowerCase();
             const isHwy = address.highway || address.motorway || address.trunk || lData.type === 'trunk' || lData.type === 'motorway' || roadStr.includes('highway') || roadStr.includes('expressway') || roadStr.includes('freeway');
-            const isService = lData.type === 'service' || roadStr.includes('service');
             
-            if (isService) {
-                detectedRoad = "Service Roads";
-            } else if (isHwy) {
-                if(roadStr.includes('state')) detectedRoad = "State Highway";
-                else if(roadStr.includes('expressway')) detectedRoad = "Expressway";
-                else detectedRoad = "National Highway";
+            if (isHwy) {
+                detectedRoad = "Highway";
             } else if (address.city || address.town || address.suburb || address.commercial || address.retail || address.neighborhood) {
-                detectedRoad = "Urban Roads";
+                detectedRoad = "Urban";
             }
             
             document.getElementById('ui-place-name').textContent = address.neighbourhood || address.suburb || address.town || address.city || address.village || address.county || address.state || "Unknown Location";
@@ -322,8 +353,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('humidity').value = hum;
             
             // Set Road Condition based on Weather
-            let autoRoadCond = "Dry Road";
-            if (['Rain', 'Drizzle', 'Storm', 'Thunderstorm', 'Snow'].includes(weatherMain)) autoRoadCond = "Wet Road";
+            let autoRoadCond = "Dry";
+            if (['Rain', 'Drizzle', 'Storm', 'Thunderstorm', 'Snow'].includes(weatherMain)) autoRoadCond = "Wet";
             document.getElementById('road_condition').value = autoRoadCond;
             document.getElementById('ui-road-cond').textContent = autoRoadCond;
             
@@ -365,6 +396,61 @@ document.addEventListener('DOMContentLoaded', () => {
     // ENABLE MANUAL MAP CLICK
     map.on('click', async function(e) {
         await executeGeoSync(e.latlng.lat, e.latlng.lng);
+    });
+
+    let watchId = null;
+    let isLiveSpeed = false;
+    let lastAutoPredict = 0;
+    const btnSpeedo = document.getElementById('btn-speedometer');
+    const speedInput = document.getElementById('vehicle_speed');
+
+    btnSpeedo.addEventListener('click', () => {
+        isLiveSpeed = !isLiveSpeed;
+        if (isLiveSpeed) {
+            btnSpeedo.style.backgroundColor = '#ef4444'; 
+            btnSpeedo.style.color = '#fff';
+            btnSpeedo.textContent = '🛑 Stop';
+            
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            if (navigator.geolocation) {
+                watchId = navigator.geolocation.watchPosition((pos) => {
+                    let speedMps = pos.coords.speed;
+                    if (speedMps === null || speedMps === undefined) speedMps = 0;
+                    let speedMph = speedMps * 2.23694;
+                    
+                    if (speedMps === 0 && window.MOCK_SPEED) speedMph = window.MOCK_SPEED;
+                    speedInput.value = speedMph.toFixed(1);
+                    
+                    const now = Date.now();
+                    const sBtn = document.getElementById('submit-btn');
+                    if (now - lastAutoPredict > 4000 && !sBtn.disabled) {
+                        lastAutoPredict = now;
+                        if (!document.getElementById('lat').value) {
+                            executeGeoSync(pos.coords.latitude, pos.coords.longitude).then(() => sBtn.click());
+                        } else {
+                            sBtn.click();
+                        }
+                    }
+                }, (err) => {
+                    alert("Speedometer error: " + err.message);
+                    btnSpeedo.click();
+                }, { enableHighAccuracy: true });
+            } else {
+                alert('Geolocation not supported!');
+                btnSpeedo.click();
+            }
+        } else {
+            btnSpeedo.style.backgroundColor = '';
+            btnSpeedo.style.color = '';
+            btnSpeedo.textContent = '⏱️ Live';
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            stopAlarm();
+        }
     });
 
     const btnPdf = document.getElementById('btn-pdf');
@@ -437,10 +523,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (data.error) {
                 alert('Error: ' + data.error);
+                stopAlarm();
             } else {
                 levelEl.textContent = `Level ${data.severity_level}`;
                 labelEl.textContent = data.label;
                 descEl.textContent  = data.explanation;
+                
+                if (isLiveSpeed && data.severity_level >= 2) {
+                    playAlarm();
+                } else {
+                    stopAlarm();
+                }
                 document.getElementById('res-score').textContent = data.driver_score;
                 document.getElementById('res-emergency').textContent = data.emergency_response;
                 document.getElementById('res-ai').textContent = data.ai_explanation;

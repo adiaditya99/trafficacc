@@ -11,7 +11,7 @@ import os
 print("Starting model training process...")
 
 # Load dataset
-file_path = "traffic_accident_dataset_50000.csv"
+file_path = "US accident datset.csv"
 print(f"Loading dataset: {file_path}")
 df = pd.read_csv(file_path)
 
@@ -21,28 +21,28 @@ print(f"Columns: {df.columns.tolist()}")
 
 print("Mapping Severity labels to numeric (1=Low, 2=Medium, 3=High, 4=Critical)...")
 severity_mapper = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
-df['Severity'] = df['Severity'].map(severity_mapper)
-df['Severity'].fillna(1, inplace=True) # fallback just in case
-print(f"Severity distribution:\n{df['Severity'].value_counts().sort_index()}")
+df['Severity_Level'] = df['Severity_Level'].map(severity_mapper)
+df['Severity_Level'].fillna(1, inplace=True) # fallback just in case
+print(f"Severity distribution:\n{df['Severity_Level'].value_counts().sort_index()}")
 
 # ─────────────────────────────────────────────────────────
 # Features: new dataset columns
 # ─────────────────────────────────────────────────────────
 feature_cols = [
-    'Road_Type', 'Road_Condition', 'Vehicle_Speed', 'Speed_Limit',
+    'Road_Type', 'Road_Condition', 'Weather_Condition', 'Vehicle_Speed', 'Speed_Limit',
     'Vehicle_Type', 'Temperature', 'Humidity', 'Visibility',
     'T_Junction', 'Crossing', 'Railway_Crossing',
     'Stop_Signal', 'Speed_Breaker'
 ]
 
 X = df[feature_cols].copy()
-y = df['Severity']
+y = df['Severity_Level']
 
 # ─────────────────────────────────────────────────────────
 # Encode categorical columns
 # ─────────────────────────────────────────────────────────
 encoders = {}
-categorical_cols = ['Road_Type', 'Road_Condition', 'Vehicle_Type']
+categorical_cols = ['Road_Type', 'Road_Condition', 'Weather_Condition', 'Vehicle_Type']
 
 for col in categorical_cols:
     le = LabelEncoder()

@@ -378,7 +378,7 @@ def realtime_predict():
     driver_score = min(int(base_risk + weather_risk + road_risk + 5), 100)
     
     input_dict = {}
-    categorical_cols = ['Road_Type', 'Road_Condition', 'Vehicle_Type']
+    categorical_cols = ['Road_Type', 'Road_Condition', 'Weather_Condition', 'Vehicle_Type']
     for feat in features:
         if feat in categorical_cols:
             val = str(data.get(feat, ''))
@@ -408,31 +408,36 @@ def realtime_predict():
         4: "Critical: Dispatch Ambulance, ICU Preparation & Police Assistance"
     }
     
-    # Dual Language AI Explanations (English + Hindi)
-    exps_en = []
-    exps_hi = []
-    
-    if speed > limit + 10: 
-        exps_en.append("High vehicle speed over the limit sharply increased the risk.")
-        exps_hi.append("तेज गति के कारण जोखिम काफी बढ़ गया है।")
+    final_explanation = ""
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
         
-    if weather in ['Rainy', 'Snow', 'Storm', 'Foggy']: 
-        exps_en.append(f"Adverse weather ({weather}) severely reduced traction and safety.")
-        exps_hi.append(f"खराब मौसम ({weather}) ने कर्षण और सुरक्षा को गंभीर रूप से कम कर दिया है।")
-        
-    if data.get('Road_Type') == 'Highway' and speed > 80: 
-        exps_en.append("High speed combined with a highway environment contributed to severity.")
-        exps_hi.append("राजमार्ग के वातावरण के साथ उच्च गति ने गंभीरता में योगदान दिया।")
-        
-    if data.get('Road_Condition') in ['Wet', 'Ice', 'Snow', 'Damaged']:
-        exps_en.append(f"Dangerous road surface ({data.get('Road_Condition')}) destabilized the vehicle.")
-        exps_hi.append("खतरनाक सड़क की सतह ने वाहन को अस्थिर कर दिया।")
+        sys_prompt = """You are an advanced AI assistant integrated into a Traffic Accident Risk Prediction System.
+Your role is to help users understand predictions, risks, and safety recommendations in simple and clear language.
+Restrictions: Do NOT give medical or legal advice. Do NOT claim 100% accuracy. Do NOT use complex technical terms. Ensure support for India-wide context.
+HOW YOU SHOULD RESPOND: Keep answers short but meaningful. Always explain "WHY". If risk is HIGH: Emphasize safety and suggest immediate action. Tone: Helpful, clear, calm, and safety-focused."""
 
-    if not exps_en: 
-        exps_en.append("Routine conditions detected; baseline risk model applied.")
-        exps_hi.append("सामान्य स्थितियों का पता चला; आधार रेखा लागू की गई।")
-
-    final_explanation = " ".join(exps_en) + " | हिंदी: " + " ".join(exps_hi)
+        user_content = f"The ML model predicted a '{info.get('label')}' risk severity level. Context: I am driving at {speed}km/h (Zone limit: {limit}km/h). Weather condition is {weather}. Road condition is {road_cond}. Explain why my risk is {info.get('label')} and give me clear, actionable safety advice."
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            timeout=8
+        )
+        final_explanation = response.choices[0].message.content.strip()
+    except Exception as e:
+        print("OpenAI Error:", e)
+        # Fallback Mode
+        exps_en = []
+        if speed > limit + 10: exps_en.append("High vehicle speed over the limit sharply increased the risk.")
+        if weather in ['Rainy', 'Snow', 'Storm', 'Foggy']: exps_en.append(f"Adverse weather ({weather}) severely reduced traction and safety.")
+        if data.get('Road_Condition') in ['Wet', 'Ice', 'Snow', 'Damaged']: exps_en.append(f"Dangerous road surface ({data.get('Road_Condition')}) destabilized the vehicle.")
+        if not exps_en: exps_en.append("Routine conditions detected; baseline risk model applied.")
+        final_explanation = " ".join(exps_en) + "\n\n*(Note: Basic fallback explanation used due to network delay)*"
 
     return jsonify({
         'severity_level': pred,
@@ -443,6 +448,45 @@ def realtime_predict():
         'emergency_response': emergency_map.get(pred, "Standard Response"),
         'ai_explanation': final_explanation
     })
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    data = request.json
+    user_msg = data.get('message', '').strip()
+    history = data.get('history', [])
+    
+    if not user_msg:
+        return jsonify({'error': 'Message cannot be empty.'}), 400
+        
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+        
+        sys_prompt = "You are a helpful, clear, and safety-focused AI Traffic Assistant for an Indian Traffic Severity Predictor system. Answer driving safety, app usage, and traffic-related questions quickly and easily without complex jargon. Do not provide medical or legal advice."
+        
+        messages = [{"role": "system", "content": sys_prompt}]
+        
+        # Add a couple of previous messages for brief conversational context
+        for msg in history[-4:]: 
+            messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+            
+        messages.append({"role": "user", "content": user_msg})
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            timeout=8
+        )
+        
+        ai_reply = response.choices[0].message.content.strip()
+        return jsonify({"reply": ai_reply})
+        
+    except Exception as e:
+        error_msg = str(e)
+        print("Chatbot Error:", error_msg)
+        if "quota" in error_msg.lower() or "429" in error_msg:
+            return jsonify({"reply": "⚠️ Your OpenAI API Key has run out of credits (Quota Exceeded)! Please top up your OpenAI billing account to chat with me."})
+        return jsonify({"error": "I'm having trouble connecting right now. Please drive safely and try asking again later!"}), 500
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', debug=True, port=5000)
