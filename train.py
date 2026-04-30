@@ -1,9 +1,9 @@
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.preprocessing import LabelEncoder
 import joblib
 import os
@@ -19,8 +19,8 @@ print(f"Dataset loaded. Shape: {df.shape}")
 print(f"Columns: {df.columns.tolist()}")
 
 
-print("Mapping Severity labels to numeric (1=Low, 2=Medium, 3=High, 4=Critical)...")
-severity_mapper = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+print("Mapping Severity labels to numeric (1=Low, 2=Medium, 3=High)...")
+severity_mapper = {'Low': 1, 'Medium': 2, 'High': 3}
 df['Severity_Level'] = df['Severity_Level'].map(severity_mapper)
 df['Severity_Level'].fillna(1, inplace=True) # fallback just in case
 print(f"Severity distribution:\n{df['Severity_Level'].value_counts().sort_index()}")
@@ -61,7 +61,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 print("\nTraining Multiple Models for Comparison...")
 models = {
     "Logistic Regression": LogisticRegression(max_iter=1000),
-    "Random Forest": RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42),
+    "Decision Tree": DecisionTreeClassifier(max_depth=10, random_state=42),
     "XGBoost": xgb.XGBClassifier(eval_metric='mlogloss', random_state=42)
 }
 
@@ -89,6 +89,8 @@ print(f"Best Model Selected: {type(best_model).__name__} with {best_acc * 100:.2
 print(f"Total records used: {len(df)}")
 print("\nClassification Report (Best Model):")
 print(classification_report(y_test, best_pred, zero_division=0))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, best_pred))
 print("=" * 50)
 
 model = best_model

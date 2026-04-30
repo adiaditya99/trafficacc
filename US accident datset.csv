@@ -1,6 +1,6 @@
 Road_Type,Road_Condition,Weather_Condition,Vehicle_Speed,Speed_Limit,Vehicle_Type,Temperature,Humidity,Visibility,T_Junction,Crossing,Stop_Signal,Railway_Crossing,Speed_Breaker,Severity_Level
 Rural,Dry,Storm,68,40,Truck,25,87,14,0,1,1,0,0,Medium
-Urban,Dry,Cloudy,31,50,Bike,30,54,73,1,0,0,0,1,Low
+Urban,Dry,Cloudy,31,50,Bike,30,22,73,1,0,0,0,1,high
 Highway,Damaged,Storm,111,80,Truck,22,93,24,1,1,0,1,0,High
 Urban,Dry,Fog,31,50,Car,22,98,44,1,0,0,1,0,Low
 Highway,Dry,Rainy,86,80,Bike,27,76,54,1,0,1,0,0,Medium

@@ -23,17 +23,18 @@
             <div class="form-grid">
 
                 <!-- Hidden Auto-Fetched Road Data -->
-                <input type="hidden" id="road_type" name="Road_Type" value="Urban Roads">
-                <input type="hidden" id="road_condition" name="Road_Condition" value="Dry Road">
+                <input type="hidden" id="road_type" name="Road_Type" value="Urban">
+                <input type="hidden" id="road_condition" name="Road_Condition" value="Dry">
 
                 <!-- Vehicle Speed -->
                 <div class="input-group">
-                    <label for="vehicle_speed">Vehicle Speed (mph)</label>
+                    <label for="vehicle_speed">Vehicle Speed (km/h)</label>
                     <div style="display: flex; gap: 10px;">
                         <input type="number" step="0.1" id="vehicle_speed" name="Vehicle_Speed"
                                min="0" max="250" placeholder="e.g. 65" class="glass-input" style="flex: 1;" required>
-                        <button type="button" id="btn-speedometer" class="btn btn-secondary" style="white-space: nowrap; padding: 0.5rem 1rem; width:110px;" title="Track speed via device GPS">⏱️ Live</button>
+                        <button type="button" id="btn-speedometer" class="btn btn-secondary" style="white-space: nowrap; padding: 0.5rem 1rem; width:130px;" title="Track speed via device GPS">⏱️ Start Live</button>
                     </div>
+                    <div id="live-status-text" style="font-size: 0.8rem; color: #10b981; margin-top: 5px; display: none;">Live mode uses GPS location and GPS speed automatically.</div>
                 </div>
 
                 <!-- Speed Limit (Hidden, Automatically Synced) -->
@@ -64,7 +65,7 @@
                     </select>
                 </div>
 
-                <input type="hidden" id="weather" name="Weather_Condition" value="Clear">
+                <input type="hidden" id="weather" name="Weather_Condition" value="Sunny">
             </div>
 
             <!-- Road Infrastructure (binary checkboxes) -->
@@ -111,7 +112,7 @@
                             <span id="ui-temp">--</span>°C | <span id="ui-hum">--</span>% Hum
                         </div>
                         <div style="font-size: 0.75rem; color: #10b981; font-weight: 600; background: rgba(16,185,129,0.1); padding: 2px 6px; border-radius: 4px; display: inline-block;">
-                            Max Speed: <span id="ui-speed-limit">40 mph (Default)</span>
+                            Max Speed: <span id="ui-speed-limit">40 km/h (Default)</span>
                         </div>
                     </div>
                 </div>
@@ -175,8 +176,30 @@
 let audioCtx;
 let alarmPlaying = false;
 let alarmInterval = null;
+let voiceRepeatInterval = null;
+let activeSeverity = 1;
+let enAudio = null;
 
-function playAlarm() {
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+    // Unlock Speech Synthesis context securely on mobile/chrome
+    if (window.speechSynthesis) {
+        let blankMsg = new SpeechSynthesisUtterance("");
+        blankMsg.volume = 0;
+        window.speechSynthesis.speak(blankMsg);
+    }
+    // Unlock HTML Audio securely
+    let silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+    silentAudio.volume = 0;
+    silentAudio.play().catch(e => {});
+}
+
+function playHighAlarm() {
     if (alarmPlaying) return;
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -188,13 +211,35 @@ function playAlarm() {
         osc.type = 'square';
         osc.frequency.setValueAtTime(800, audioCtx.currentTime); 
         osc.frequency.setValueAtTime(1200, audioCtx.currentTime + 0.2); 
-        g.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        g.gain.setValueAtTime(0.8, audioCtx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
         osc.connect(g);
         g.connect(audioCtx.destination);
         osc.start();
         osc.stop(audioCtx.currentTime + 0.4);
-    }, 500);
+    }, 400);
+
+    alarmPlaying = true;
+}
+
+function playMediumAlarm() {
+    if (alarmPlaying) return;
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    
+    alarmInterval = setInterval(() => {
+        if (!alarmPlaying) return;
+        let osc = audioCtx.createOscillator();
+        let g = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime); 
+        g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.connect(g);
+        g.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+    }, 1000);
 
     alarmPlaying = true;
 }
@@ -203,6 +248,78 @@ function stopAlarm() {
     alarmPlaying = false;
     if (alarmInterval) clearInterval(alarmInterval);
     alarmInterval = null;
+    
+    if (voiceRepeatInterval) {
+        clearInterval(voiceRepeatInterval);
+        voiceRepeatInterval = null;
+    }
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+    if (enAudio) {
+        enAudio.pause();
+        enAudio.currentTime = 0;
+    }
+}
+
+function speakEnglishAlert(enText) {
+    if (enAudio && !enAudio.paused) return; // Prevent overlapped pile-up
+
+    // Primary: Google Cloud TTS (Guaranteed Smooth Female English Voice)
+    let url = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en&q=" + encodeURIComponent(enText);
+    enAudio = new Audio(url);
+    enAudio.play().catch(e => {
+        // Fallback: OS Native TTS
+        if (window.speechSynthesis.speaking) return; 
+
+        let voices = window.speechSynthesis.getVoices();
+        // Look for any female designated English voice specifically
+        let enVoice = voices.find(v => (v.lang.includes('en') || v.lang === 'en-US' || v.lang === 'en-GB') && v.name.toLowerCase().includes('female'));
+        if (!enVoice) enVoice = voices.find(v => v.lang.includes('en') || v.lang === 'en-US' || v.lang === 'en-GB'); 
+
+        let enUtterance = new SpeechSynthesisUtterance(enText);
+        enUtterance.lang = 'en-US';
+        if (enVoice) {
+            enUtterance.voice = enVoice;
+        }
+        enUtterance.rate = 1.0;
+
+        window.speechSynthesis.speak(enUtterance);
+    });
+}
+
+function handleRiskAlert(severityLevel) {
+    let shouldRestart = (activeSeverity !== severityLevel || !alarmPlaying);
+    
+    if (severityLevel === 1) { // Low Risk
+        stopAlarm();
+        activeSeverity = 1;
+        return;
+    }
+
+    if (shouldRestart) {
+        stopAlarm();
+        activeSeverity = severityLevel;
+        
+        let enText = "";
+        let repeatDelay = 5000;
+        
+        if (severityLevel === 3) { // High
+            setTimeout(playHighAlarm, 50);
+            enText = "Danger! High risk detected. Slow down immediately.";
+            repeatDelay = 3000;
+        } else if (severityLevel === 2) { // Medium
+            setTimeout(playMediumAlarm, 50);
+            enText = "Warning! Medium risk detected. Please drive carefully.";
+            repeatDelay = 5000;
+        }
+
+        speakEnglishAlert(enText);
+
+        voiceRepeatInterval = setInterval(() => {
+            speakEnglishAlert(enText);
+        }, repeatDelay);
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -320,7 +437,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             document.getElementById('speed_limit').value = limitVal;
             if (document.getElementById('ui-speed-limit')) {
-                document.getElementById('ui-speed-limit').textContent = limitVal + " mph (" + limitSrc + ")";
+                document.getElementById('ui-speed-limit').textContent = limitVal + " km/h (" + limitSrc + ")";
             }
             // Set Infrastructure & T-Junction Checkbox
             document.getElementById('chk_crossing').checked = lData.infra.includes("Crossing");
@@ -345,7 +462,9 @@ document.addEventListener('DOMContentLoaded', () => {
             let temp        = wData.temp || 20;
             
             // Update Form Data
-            if(['Clear', 'Clouds'].includes(weatherMain)) document.getElementById('weather').value = 'Clear';
+            if(['Clear'].includes(weatherMain)) document.getElementById('weather').value = 'Sunny';
+            else if(['Clouds'].includes(weatherMain)) document.getElementById('weather').value = 'Cloudy';
+            else if(['Fog', 'Mist', 'Haze'].includes(weatherMain)) document.getElementById('weather').value = 'Fog';
             else if(['Rain', 'Drizzle'].includes(weatherMain)) document.getElementById('weather').value = 'Rainy';
             else document.getElementById('weather').value = 'Storm';
             
@@ -407,44 +526,58 @@ document.addEventListener('DOMContentLoaded', () => {
     btnSpeedo.addEventListener('click', () => {
         isLiveSpeed = !isLiveSpeed;
         if (isLiveSpeed) {
+            initAudio(); // Trigger synch user gesture payload
             btnSpeedo.style.backgroundColor = '#ef4444'; 
             btnSpeedo.style.color = '#fff';
-            btnSpeedo.textContent = '🛑 Stop';
-            
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
+            btnSpeedo.textContent = '🛑 Stop Live';
+            document.getElementById('live-status-text').style.display = 'block';
+            document.getElementById('live-status-text').innerHTML = 'Live mode uses GPS location and GPS speed automatically.';
 
             if (navigator.geolocation) {
-                watchId = navigator.geolocation.watchPosition((pos) => {
-                    let speedMps = pos.coords.speed;
-                    if (speedMps === null || speedMps === undefined) speedMps = 0;
-                    let speedMph = speedMps * 2.23694;
-                    
-                    if (speedMps === 0 && window.MOCK_SPEED) speedMph = window.MOCK_SPEED;
-                    speedInput.value = speedMph.toFixed(1);
-                    
-                    const now = Date.now();
-                    const sBtn = document.getElementById('submit-btn');
-                    if (now - lastAutoPredict > 4000 && !sBtn.disabled) {
-                        lastAutoPredict = now;
-                        if (!document.getElementById('lat').value) {
-                            executeGeoSync(pos.coords.latitude, pos.coords.longitude).then(() => sBtn.click());
-                        } else {
-                            sBtn.click();
-                        }
-                    }
-                }, (err) => {
-                    alert("Speedometer error: " + err.message);
-                    btnSpeedo.click();
-                }, { enableHighAccuracy: true });
+                // Get initial loc and execute GeoSync
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        executeGeoSync(pos.coords.latitude, pos.coords.longitude).then(() => {
+                            watchId = navigator.geolocation.watchPosition((pos) => {
+                                let speedMps = pos.coords.speed;
+                                if (speedMps === null || speedMps === undefined) {
+                                    speedMps = 0;
+                                    document.getElementById('live-status-text').innerHTML = 'Waiting for movement to detect speed...';
+                                }
+                                let speedKmh = speedMps * 3.6;
+                                
+                                if (speedMps === 0 && window.MOCK_SPEED) speedKmh = window.MOCK_SPEED;
+                                speedInput.value = speedKmh.toFixed(1);
+                                
+                                const now = Date.now();
+                                const sBtn = document.getElementById('submit-btn');
+                                if (now - lastAutoPredict > 4000 && !sBtn.disabled) {
+                                    lastAutoPredict = now;
+                                    sBtn.click();
+                                }
+                            }, (err) => {
+                                alert("Speedometer error: " + err.message);
+                                btnSpeedo.click();
+                            }, { enableHighAccuracy: true });
+                        });
+                    },
+                    (err) => {
+                        alert("Location permission is required for live driver monitoring.");
+                        btnSpeedo.click();
+                    },
+                    { enableHighAccuracy: true }
+                );
             } else {
-                alert('Geolocation not supported!');
+                alert('Location permission is required for live driver monitoring.');
                 btnSpeedo.click();
             }
         } else {
             btnSpeedo.style.backgroundColor = '';
             btnSpeedo.style.color = '';
-            btnSpeedo.textContent = '⏱️ Live';
+            btnSpeedo.textContent = '⏱️ Start Live';
+            if (document.getElementById('live-status-text')) {
+                document.getElementById('live-status-text').style.display = 'none';
+            }
             if (watchId !== null) {
                 navigator.geolocation.clearWatch(watchId);
                 watchId = null;
@@ -484,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        initAudio(); // Trigger synch user gesture payload
 
         // Show loader
         btnText.textContent = 'Predicting...';
@@ -539,89 +673,115 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('res-ai').textContent = data.ai_explanation;
                 badge.style.borderColor = data.color;
                 labelEl.style.color     = data.color;
-                
-                // OSM Backend Proxy Hospital Fetch logic (Now runs for ALL severities + 50km radius)
-                const hospBox = document.getElementById('hospital-box');
-                hospBox.style.display = 'block';
-                document.getElementById('res-hospital').textContent = "Scanning vicinity for hospitals (50km max radius)...";
-                document.getElementById('res-hospital').style.color = "#10b981";
-                
-                try {
-                    const gpsLat = parseFloat(document.getElementById('lat').value);
-                    const gpsLon = parseFloat(document.getElementById('lon').value);
-                    
-                    fetch(`/api/hospitals?lat=${gpsLat}&lon=${gpsLon}`)
-                    .then(r => r.json()).then(hData => {
-                        if (hData.nearest || hData.government) {
-                            let resultsHtml = "";
-                            const boundsArray = [ [gpsLat, gpsLon] ];
-                            
-                            // 🚀 Dedicated Results Map Logic Setup
-                            if(hospMarker) map.removeLayer(hospMarker);
-                            document.getElementById('hospital-map').style.display = 'block';
-                            if (!hospMapInstance) {
-                                hospMapInstance = L.map('hospital-map').setView([gpsLat, gpsLon], 13);
-                                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '© CARTO' }).addTo(hospMapInstance);
-                            }
-                            hospMapMarkers.forEach(m => hospMapInstance.removeLayer(m));
-                            hospMapMarkers = [];
-                            
-                            const crashPin = L.marker([gpsLat, gpsLon]).addTo(hospMapInstance).bindPopup("⚠️ Crash Site");
-                            hospMapMarkers.push(crashPin);
 
-                            if (hData.nearest) {
-                                let n = hData.nearest;
-                                resultsHtml += `${n.name} (${n.distance}km, ${n.type})<br>`;
-                                boundsArray.push([n.lat, n.lon]);
-                                
-                                // Plot Nearest
-                                hospMarker = L.marker([n.lat, n.lon], {icon: hospIcon}).addTo(map).bindPopup(`<b>${n.name}</b><br>${n.distance}km (${n.type})`);
-                                const r1 = L.marker([n.lat, n.lon], {icon: hospIcon}).addTo(hospMapInstance).bindPopup(`<b>${n.name}</b><br>Nearest: ${n.distance}km`).openPopup();
-                                const line1 = L.polyline([ [gpsLat, gpsLon], [n.lat, n.lon] ], {color: '#ef4444', weight: 4, dashArray: '10, 10'}).addTo(hospMapInstance);
-                                hospMapMarkers.push(r1, line1);
-                            }
-                            
-                            if (hData.government && (!hData.nearest || hData.government.name !== hData.nearest.name)) {
-                                let g = hData.government;
-                                resultsHtml += `🏛️ Gov Facility: ${g.name} (${g.distance}km)<br>`;
-                                boundsArray.push([g.lat, g.lon]);
-                                
-                                // Plot Government
-                                const r2 = L.marker([g.lat, g.lon], {icon: govIcon}).addTo(hospMapInstance).bindPopup(`<b>${g.name}</b><br>Gov Facility: ${g.distance}km`);
-                                const line2 = L.polyline([ [gpsLat, gpsLon], [g.lat, g.lon] ], {color: '#3b82f6', weight: 4, dashArray: '10, 10'}).addTo(hospMapInstance);
-                                hospMapMarkers.push(r2, line2);
-                            }
-                            
-                            document.getElementById('res-hospital').innerHTML = "<br>" + resultsHtml;
-                            
-                            // Camera Framing logic
-                            if(userMarker && hospMarker) {
-                                const mainBounds = L.latLngBounds([userMarker.getLatLng(), hospMarker.getLatLng()]);
-                                map.fitBounds(mainBounds, {padding: [50, 50], animate: true, duration: 2});
-                            }
-                            
-                            const hBounds = L.latLngBounds(boundsArray);
-                            setTimeout(() => { 
-                                hospMapInstance.invalidateSize(); 
-                                hospMapInstance.fitBounds(hBounds, {padding: [30, 30]}); 
-                            }, 400);
-                            
-                        } else {
-                            document.getElementById('res-hospital').textContent = "No emergency center found within 50km.";
-                            document.getElementById('res-hospital').style.color = "#fbbf24";
-                            document.getElementById('hospital-map').style.display = 'none';
-                        }
-                    }).catch(e => {
-                        document.getElementById('res-hospital').textContent = "Hospital index unavailable.";
-                        document.getElementById('res-hospital').style.color = "#ef4444";
-                    });
+                const isLowRisk = data.severity_level === 1;
+
+                if (isLowRisk) {
+                    handleRiskAlert(1);
+                    if (isLiveSpeed) {
+                        resultBox.classList.add('hidden');
+                        document.getElementById('live-status-text').innerHTML = '✅ Live monitoring active — Low risk detected';
+                        document.getElementById('live-status-text').style.color = '#10b981';
+                    } else {
+                        // Manual query
+                        resultBox.classList.remove('hidden');
+                        document.getElementById('hospital-box').style.display = 'none';
+                        resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                } else {
+                    // Medium or High
+                    handleRiskAlert(data.severity_level);
                     
-                } catch (gEr) {
-                    document.getElementById('res-hospital').textContent = "System Error: " + gEr.message;
-                    document.getElementById('res-hospital').style.color = "#ef4444";
+                    if (isLiveSpeed) {
+                        document.getElementById('live-status-text').innerHTML = `⚠️ Live monitoring active — ${data.label} risk detected`;
+                        document.getElementById('live-status-text').style.color = data.color;
+                    }
+
+                    // Show hospital search for Medium/High
+                    const hospBox = document.getElementById('hospital-box');
+                    hospBox.style.display = 'block';
+                    document.getElementById('res-hospital').textContent = "Scanning vicinity for hospitals (50km max radius)...";
+                    document.getElementById('res-hospital').style.color = "#10b981";
+                    
+                    try {
+                        const gpsLat = parseFloat(document.getElementById('lat').value);
+                        const gpsLon = parseFloat(document.getElementById('lon').value);
+                        
+                        fetch(`/api/hospitals?lat=${gpsLat}&lon=${gpsLon}`)
+                        .then(r => r.json()).then(hData => {
+                            if (hData.nearest || hData.government) {
+                                let resultsHtml = "";
+                                const boundsArray = [ [gpsLat, gpsLon] ];
+                                
+                                // 🚀 Dedicated Results Map Logic Setup
+                                if(hospMarker) map.removeLayer(hospMarker);
+                                document.getElementById('hospital-map').style.display = 'block';
+                                if (!hospMapInstance) {
+                                    hospMapInstance = L.map('hospital-map').setView([gpsLat, gpsLon], 13);
+                                    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '© CARTO' }).addTo(hospMapInstance);
+                                }
+                                hospMapMarkers.forEach(m => hospMapInstance.removeLayer(m));
+                                hospMapMarkers = [];
+                                
+                                const crashPin = L.marker([gpsLat, gpsLon]).addTo(hospMapInstance).bindPopup("⚠️ Crash Site");
+                                hospMapMarkers.push(crashPin);
+
+                                if (hData.nearest) {
+                                    let n = hData.nearest;
+                                    resultsHtml += `${n.name} (${n.distance}km, ${n.type})<br>`;
+                                    boundsArray.push([n.lat, n.lon]);
+                                    
+                                    // Plot Nearest
+                                    hospMarker = L.marker([n.lat, n.lon], {icon: hospIcon}).addTo(map).bindPopup(`<b>${n.name}</b><br>${n.distance}km (${n.type})`);
+                                    const r1 = L.marker([n.lat, n.lon], {icon: hospIcon}).addTo(hospMapInstance).bindPopup(`<b>${n.name}</b><br>Nearest: ${n.distance}km`).openPopup();
+                                    const line1 = L.polyline([ [gpsLat, gpsLon], [n.lat, n.lon] ], {color: '#ef4444', weight: 4, dashArray: '10, 10'}).addTo(hospMapInstance);
+                                    hospMapMarkers.push(r1, line1);
+                                }
+                                
+                                if (hData.government && (!hData.nearest || hData.government.name !== hData.nearest.name)) {
+                                    let g = hData.government;
+                                    resultsHtml += `🏛️ Gov Facility: ${g.name} (${g.distance}km)<br>`;
+                                    boundsArray.push([g.lat, g.lon]);
+                                    
+                                    // Plot Government
+                                    const r2 = L.marker([g.lat, g.lon], {icon: govIcon}).addTo(hospMapInstance).bindPopup(`<b>${g.name}</b><br>Gov Facility: ${g.distance}km`);
+                                    const line2 = L.polyline([ [gpsLat, gpsLon], [g.lat, g.lon] ], {color: '#3b82f6', weight: 4, dashArray: '10, 10'}).addTo(hospMapInstance);
+                                    hospMapMarkers.push(r2, line2);
+                                }
+                                
+                                document.getElementById('res-hospital').innerHTML = "<br>" + resultsHtml;
+                                
+                                // Camera Framing logic
+                                if(userMarker && hospMarker) {
+                                    const mainBounds = L.latLngBounds([userMarker.getLatLng(), hospMarker.getLatLng()]);
+                                    map.fitBounds(mainBounds, {padding: [50, 50], animate: true, duration: 2});
+                                }
+                                
+                                const hBounds = L.latLngBounds(boundsArray);
+                                setTimeout(() => { 
+                                    hospMapInstance.invalidateSize(); 
+                                    hospMapInstance.fitBounds(hBounds, {padding: [30, 30]}); 
+                                }, 400);
+                                
+                            } else {
+                                document.getElementById('res-hospital').textContent = "No emergency center found within 50km.";
+                                document.getElementById('res-hospital').style.color = "#fbbf24";
+                                document.getElementById('hospital-map').style.display = 'none';
+                            }
+                        }).catch(e => {
+                            document.getElementById('res-hospital').textContent = "Hospital index unavailable.";
+                            document.getElementById('res-hospital').style.color = "#ef4444";
+                        });
+                        
+                    } catch (gEr) {
+                        document.getElementById('res-hospital').textContent = "System Error: " + gEr.message;
+                        document.getElementById('res-hospital').style.color = "#ef4444";
+                    }
+                    resultBox.classList.remove('hidden');
+                    if (!isLiveSpeed) {
+                        resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
                 }
-                resultBox.classList.remove('hidden');
-                resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
         } catch (err) {
             alert('Request failed: ' + err.message);

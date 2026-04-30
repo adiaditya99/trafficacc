@@ -53,9 +53,7 @@ SEVERITY_MAP = {
     2: {"label": "Medium",   "color": "#f59e0b",
         "desc": "Moderate risk — proceed with caution. Possible delays or minor incidents."},
     3: {"label": "High",     "color": "#f97316",
-        "desc": "High risk — dangerous conditions detected. Significant chance of a serious accident."},
-    4: {"label": "Critical", "color": "#ef4444",
-        "desc": "Critical risk — road closure likely. Immediate safety measures recommended."}
+        "desc": "High risk — dangerous conditions detected. Significant chance of a serious accident."}
 }
 
 # Global variables to store the loaded model, features, and encoders
@@ -296,8 +294,8 @@ def api_hospitals():
     try:
         lat_f = float(lat)
         lon_f = float(lon)
-        # 50km radius query checking Nodes, Ways, AND Relations (polygons)! Ultra-fast 'out center' limits data transfer.
-        hosp_query = f"""[out:json][timeout:15];nwr(around:50000,{lat_f},{lon_f})["amenity"="hospital"];out center;"""
+        # 15km radius query checking Nodes, Ways, AND Relations (polygons)! Ultra-fast 'out center' limits data transfer.
+        hosp_query = f"""[out:json][timeout:15];nwr(around:15000,{lat_f},{lon_f})["amenity"="hospital"];out center;"""
         url = "https://overpass-api.de/api/interpreter?data=" + urllib.parse.quote(hosp_query)
         r = requests.get(url, timeout=15)
         
@@ -339,7 +337,21 @@ def api_hospitals():
                 })
             
             if not hospitals:
-                return jsonify(fallback)
+                # Add mock fallback so user always gets a hospital demo
+                hospitals.append({
+                    "name": "City General Hospital (Mock Fallback)",
+                    "type": "Government",
+                    "lat": lat_f + 0.015,
+                    "lon": lon_f + 0.015,
+                    "distance": 2.5
+                })
+                hospitals.append({
+                    "name": "Apollo Care Center (Mock Fallback)",
+                    "type": "Private",
+                    "lat": lat_f - 0.02,
+                    "lon": lon_f + 0.01,
+                    "distance": 3.1
+                })
             
             # Sort by distance
             hospitals.sort(key=lambda x: x['distance'])
@@ -354,6 +366,19 @@ def api_hospitals():
             
     except Exception as e:
         print("Hospital API Error:", e)
+        # Emergency exception fallback
+        lat_f = float(lat) if 'lat_f' in locals() else float(lat)
+        lon_f = float(lon) if 'lon_f' in locals() else float(lon)
+        return jsonify({
+            "nearest": {
+                "name": "Emergency Medical Center (Fallback)",
+                "type": "Private",
+                "lat": lat_f + 0.01,
+                "lon": lon_f - 0.01,
+                "distance": 1.5
+            },
+            "government": None
+        })
 
     return jsonify(fallback)
 
@@ -372,8 +397,8 @@ def realtime_predict():
     
     speed_ratio = speed / limit if limit > 0 else 1.0
     base_risk = min(speed_ratio * 40, 60)
-    weather_risk = 25 if weather in ['Rainy', 'Snow', 'Storm', 'Foggy'] else 0
-    road_risk = 15 if road_cond in ['Wet', 'Ice', 'Snow', 'Damaged'] else 0
+    weather_risk = 25 if weather in ['Rainy', 'Storm', 'Fog'] else 0
+    road_risk = 15 if road_cond in ['Wet', 'Damaged'] else 0
     
     driver_score = min(int(base_risk + weather_risk + road_risk + 5), 100)
     
@@ -384,7 +409,8 @@ def realtime_predict():
             val = str(data.get(feat, ''))
             le = encoders.get(feat)
             if le:
-                val = val if val in le.classes_ else le.classes_[0]
+                if val not in le.classes_:
+                    return jsonify({'error': f"Invalid value '{val}' for {feat}. Allowed values: {list(le.classes_)}"}), 400
                 input_dict[feat] = [int(le.transform([val])[0])]
             else:
                 input_dict[feat] = [0]
@@ -402,10 +428,9 @@ def realtime_predict():
         return jsonify({'error': str(e)}), 400
 
     emergency_map = {
-        1: "Self Care / First Aid Kit Sufficient",
-        2: "General Hospital Checkup Recommended",
-        3: "Requires Immediate Ambulance Dispatch",
-        4: "Critical: Dispatch Ambulance, ICU Preparation & Police Assistance"
+        1: "Self care / First aid",
+        2: "Nearby hospital checkup recommended",
+        3: "Ambulance + police support recommended"
     }
     
     final_explanation = ""
@@ -434,8 +459,8 @@ HOW YOU SHOULD RESPOND: Keep answers short but meaningful. Always explain "WHY".
         # Fallback Mode
         exps_en = []
         if speed > limit + 10: exps_en.append("High vehicle speed over the limit sharply increased the risk.")
-        if weather in ['Rainy', 'Snow', 'Storm', 'Foggy']: exps_en.append(f"Adverse weather ({weather}) severely reduced traction and safety.")
-        if data.get('Road_Condition') in ['Wet', 'Ice', 'Snow', 'Damaged']: exps_en.append(f"Dangerous road surface ({data.get('Road_Condition')}) destabilized the vehicle.")
+        if weather in ['Rainy', 'Storm', 'Fog']: exps_en.append(f"Adverse weather ({weather}) severely reduced traction and safety.")
+        if data.get('Road_Condition') in ['Wet', 'Damaged']: exps_en.append(f"Dangerous road surface ({data.get('Road_Condition')}) destabilized the vehicle.")
         if not exps_en: exps_en.append("Routine conditions detected; baseline risk model applied.")
         final_explanation = " ".join(exps_en) + "\n\n*(Note: Basic fallback explanation used due to network delay)*"
 
