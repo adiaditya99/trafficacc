@@ -9,7 +9,14 @@ import numpy as np
 import requests
 import urllib.parse
 
+from flask_cors import CORS
+
 app = Flask(__name__)
+CORS(app, origins=[
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://trafficacc.vercel.app"
+])
 app.secret_key = 'trafficai_secret_2026'
 
 MODEL_PATH    = 'model/model.pkl'
