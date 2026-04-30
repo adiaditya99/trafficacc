@@ -362,7 +362,10 @@ document.addEventListener('DOMContentLoaded', () => {
         iconAnchor: [15, 15]
     });
 
-    fetch('/api/hotspots').then(r => r.json()).then(data => {
+    fetch(`${API_BASE_URL}/api/hotspots`).then(r => {
+        if (!r.ok) throw new Error('Network response was not ok');
+        return r.json();
+    }).then(data => {
         data.forEach(pt => {
             L.circle([pt.lat, pt.lng], { color: 'red', fillColor: '#ef4444', fillOpacity: 0.5, radius: 25000 })
              .addTo(map).bindPopup("Identified Accident Hotspot");
@@ -404,7 +407,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 1. FETCH LOCATION & INFRASTRUCTURE (via Backend Proxy)
         try {
-            const lRes = await fetch(`/api/location?lat=${lat}&lon=${lon}`);
+            const lRes = await fetch(`${API_BASE_URL}/api/location?lat=${lat}&lon=${lon}`);
+            if (!lRes.ok) throw new Error('Network response was not ok');
             const lData = await lRes.json();
             
             // Set Road Type
@@ -454,7 +458,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 2. FETCH WEATHER (via Backend Proxy)
         try {
-            const wRes = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+            const wRes = await fetch(`${API_BASE_URL}/api/weather?lat=${lat}&lon=${lon}`);
+            if (!wRes.ok) throw new Error('Network response was not ok');
             const wData = await wRes.json();
             
             let weatherMain = wData.main || "Clear";
@@ -648,11 +653,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         try {
-            const res  = await fetch('/realtime_predict', {
+            const res  = await fetch(`${API_BASE_URL}/realtime_predict`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            if (!res.ok) throw new Error('Network response was not ok');
             const data = await res.json();
 
             if (data.error) {
@@ -707,8 +713,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         const gpsLat = parseFloat(document.getElementById('lat').value);
                         const gpsLon = parseFloat(document.getElementById('lon').value);
                         
-                        fetch(`/api/hospitals?lat=${gpsLat}&lon=${gpsLon}`)
-                        .then(r => r.json()).then(hData => {
+                        fetch(`${API_BASE_URL}/api/hospitals?lat=${gpsLat}&lon=${gpsLon}`)
+                        .then(r => {
+                            if (!r.ok) throw new Error('Network response was not ok');
+                            return r.json();
+                        }).then(hData => {
                             if (hData.nearest || hData.government) {
                                 let resultsHtml = "";
                                 const boundsArray = [ [gpsLat, gpsLon] ];
